@@ -1,9 +1,10 @@
 "use client";
 
-import { Dispatch, SetStateAction, useEffect, useState } from "react";
+import { Dispatch, SetStateAction, useEffect, useRef, useState } from "react";
 import { FaTrash } from "react-icons/fa";
+import { z } from "zod";
 
-const COLORS = [
+const LOCK_COLORS = [
   "#dc2626",
   "#22c55e",
   "#3b82f6",
@@ -47,15 +48,113 @@ function Lock({ position, color, open }: LockProps) {
   );
 }
 
-interface AddChoiceProps<T> {
+interface EdgeProps {
+  onMouseDown?: (e: React.MouseEvent) => void,
+  color: string,
+  endpoints: [[number, number], [number, number]], // vertex coordinates
+  locks: {
+    color: string,
+    open: boolean,
+  }[],
+  keys: {
+    color: string,
+  }[],
+  type: 'line' | 'curve',
+}
+
+function Edge({ onMouseDown, endpoints, locks, keys, color, type }: EdgeProps) {
+  let edgeDirection = [
+    endpoints[1][0] - endpoints[0][0],
+    endpoints[1][1] - endpoints[0][1],
+  ];
+  const edgeLength = Math.sqrt(Math.pow(edgeDirection[0], 2) + Math.pow(edgeDirection[1], 2));
+  if (edgeLength <= 0.01) {
+    edgeDirection = [1, 0];
+  } else {
+    edgeDirection[0] /= edgeLength;
+    edgeDirection[1] /= edgeLength;
+  }
+
+  let path;
+  if (type === "curve") {
+    const controlPoint1 = [
+      endpoints[0][0] + 50 * edgeDirection[1] + (edgeLength/2 - 50) * edgeDirection[0],
+      endpoints[0][1] - 50 * edgeDirection[0] + (edgeLength/2 - 50) * edgeDirection[1],
+    ];
+    const controlPoint2 = [
+      endpoints[1][0] + 50 * edgeDirection[1] - (edgeLength/2 - 50) * edgeDirection[0],
+      endpoints[1][1] - 50 * edgeDirection[0] - (edgeLength/2 - 50) * edgeDirection[1],
+    ];
+
+    path = `
+      M ${endpoints[0][0]},${endpoints[0][1]}
+      C ${controlPoint1[0]},${controlPoint1[1]} ${controlPoint2[0]},${controlPoint2[1]} ${endpoints[1][0]},${endpoints[1][1]}
+    `;
+  } else {
+    path = `
+      M ${endpoints[0][0]},${endpoints[0][1]}
+      L ${endpoints[1][0]},${endpoints[1][1]}
+    `;
+  }
+
+  let curveMidpoint: [number, number];
+  if (type === "curve") {
+    curveMidpoint = [
+      (endpoints[1][0] + endpoints[0][0]) / 2 + 37.5 * edgeDirection[1],
+      (endpoints[1][1] + endpoints[0][1]) / 2 - 37.5 * edgeDirection[0]
+    ];
+  } else {
+    curveMidpoint = [
+      (endpoints[1][0] + endpoints[0][0]) / 2,
+      (endpoints[1][1] + endpoints[0][1]) / 2
+    ];
+  }
+
+  const lockOffset = [20 * edgeDirection[1], -20 * edgeDirection[0]];
+
+  return (
+    <g>
+      <path stroke="transparent" fill="none" strokeWidth="20" d={path} onMouseDown={onMouseDown}/>
+      <path stroke={color} fill="none" strokeWidth="3" d={path} onMouseDown={onMouseDown}/>
+      <line x1={curveMidpoint[0]} y1={curveMidpoint[1]}
+            x2={curveMidpoint[0] - 5 * edgeDirection[0] + 5 * edgeDirection[1]}
+            y2={curveMidpoint[1] - 5 * edgeDirection[1] - 5 * edgeDirection[0]}
+            stroke={color} strokeWidth="3"/>
+      <line x1={curveMidpoint[0]} y1={curveMidpoint[1]}
+            x2={curveMidpoint[0] - 5 * edgeDirection[0] - 5 * edgeDirection[1]}
+            y2={curveMidpoint[1] - 5 * edgeDirection[1] + 5 * edgeDirection[0]}
+            stroke={color} strokeWidth="3"/>
+      {
+        locks.map((lock, i) => {
+          const position = [
+            curveMidpoint[0] + lockOffset[0] + (i - (locks.length - 1) / 2) * 25 * edgeDirection[0],
+            curveMidpoint[1] + lockOffset[1] + (i - (locks.length - 1) / 2) * 25 * edgeDirection[1],
+          ] as [number, number];
+          return <Lock key={i} position={position} color={lock.color} open={lock.open} />;
+        })
+      }
+      {
+        keys.map((key, i) => {
+          const position = [
+            curveMidpoint[0] - lockOffset[0] + (i - (keys.length - 1) / 2) * 30 * edgeDirection[0],
+            curveMidpoint[1] - lockOffset[1] + (i - (keys.length - 1) / 2) * 30 * edgeDirection[1],
+          ] as [number, number];
+          return <Key key={i} position={position} color={key.color} />;
+        })
+      }
+    </g>
+  );
+}
+
+interface SelectAndAddProps<T> {
   choices: {
     label: string,
     value: T,
   }[],
-  onAdd: (value: T) => void,
+  onChoose: (value: T) => void,
 }
 
-function AddChoice<T>({ choices, onAdd }: AddChoiceProps<T>) {
+function SelectAndAdd<T>({ choices, onChoose }: SelectAndAddProps<T>) {
   const [showSelection, setShowSelection] = useState(false);
   const [index, setIndex] = useState(0);
 
@@ -65,23 +164,41 @@ function AddChoice<T>({ choices, onAdd }: AddChoiceProps<T>) {
 
   if (!showSelection) {
     return <button onClick={() => { setShowSelection(true); }}>Add</button>;
-  } else {
-    return (
-      <span className="flex gap-1">
-        <select className="py-0.5 px-1" value={index} onChange={(e) => { setIndex(parseInt(e.target.value)); }}>
-          {choices.map((choice, i) => <option key={i} value={i} className="font-sans">{choice.label}</option>)}
-        </select>
-        <button onClick={() => {
-          setShowSelection(false);
-          onAdd(choices[index].value);
-        }} className="bg-gray-300 py-0.5 px-1 rounded">Add</button>
-        <button onClick={() => {
-          setShowSelection(false);
-        }} className="bg-gray-300 py-0.5 px-1 rounded">Cancel</button>
-      </span>
-    );
   }
+
+  return (
+    <span className="flex gap-1">
+      <select className="py-0.5 px-1" value={index} onChange={(e) => { setIndex(parseInt(e.target.value)); }}>
+        {choices.map((choice, i) => <option key={i} value={i} className="font-sans">{choice.label}</option>)}
+      </select>
+      <button onClick={() => {
+        setShowSelection(false);
+        onChoose(choices[index].value);
+      }} className="bg-gray-300 py-0.5 px-1 rounded">Add</button>
+      <button onClick={() => {
+        setShowSelection(false);
+      }} className="bg-gray-300 py-0.5 px-1 rounded">Cancel</button>
+    </span>
+  );
 }
+
+const graphSchema = z.object({
+  vertices: z.object({
+    position: z.number().array().length(2),
+    type: z.enum(["Player 1", "Player 2"]),
+    target: z.boolean(),
+  }).array(),
+  edges: z.object({
+    endpoints: z.number().array().length(2),
+    locks: z.number().array(),
+    keys: z.number().array(),
+  }).array(),
+  start: z.number().nullable(),
+  locks: z.object({
+    color: z.string(),
+    open: z.boolean(),
+  }).array(),
+});
 
 interface Graph {
   vertices: {
@@ -108,14 +225,15 @@ interface GraphEditorProps {
 }
 
 function GraphEditor({ graph, setGraph, setView }: GraphEditorProps) {
-  const [svgDimensions, setSvgDimensions] = useState([0, 0, 0, 0]);
+  const svgContainer = useRef<HTMLDivElement>(null);
+  const [svgDimensions, setSvgDimensions] = useState({ x: 0, y: 0, width: 0, height: 0 });
   const [drag, setDrag] = useState<null | {
     object: 'vertex',
     index: number,
     offsetFromInitialPosition: [number, number],
   } | {
     object: "none",
-    position: [number, number],
+    initialPosition: [number, number],
     newVertexIndex: number,
   }>(null);
   const [selected, setSelected] = useState<null | {
@@ -127,8 +245,8 @@ function GraphEditor({ graph, setGraph, setView }: GraphEditorProps) {
   // Window resize
   useEffect(() => {
     const onResize = () => {
-      const rect = document.querySelector('#svgContainer')!.getBoundingClientRect();
-      setSvgDimensions([rect.x, rect.y, rect.width, rect.height]);
+      const { x, y, width, height } = svgContainer.current!.getBoundingClientRect();
+      setSvgDimensions({ x, y, width, height });
       setDrag(null);
     };
 
@@ -152,8 +270,8 @@ function GraphEditor({ graph, setGraph, setView }: GraphEditorProps) {
               {
                 ...graph.vertices[drag.index],
                 position: [
-                  e.clientX - svgDimensions[0] - svgDimensions[2] / 2 - drag.offsetFromInitialPosition[0],
-                  e.clientY - svgDimensions[1] - svgDimensions[3] / 2 - drag.offsetFromInitialPosition[1],
+                  e.clientX - svgDimensions.x - svgDimensions.width / 2 - drag.offsetFromInitialPosition[0],
+                  e.clientY - svgDimensions.y - svgDimensions.height / 2 - drag.offsetFromInitialPosition[1],
                 ]
               },
               ...graph.vertices.slice(drag.index + 1)
@@ -162,20 +280,7 @@ function GraphEditor({ graph, setGraph, setView }: GraphEditorProps) {
         };
 
         const onMouseUp = (e: MouseEvent) => {
-          setGraph(graph => ({
-            ...graph,
-            vertices: [
-              ...graph.vertices.slice(0, drag.index),
-              {
-                ...graph.vertices[drag.index],
-                position: [
-                  e.clientX - svgDimensions[0] - svgDimensions[2] / 2 - drag.offsetFromInitialPosition[0],
-                  e.clientY - svgDimensions[1] - svgDimensions[3] / 2 - drag.offsetFromInitialPosition[1],
-                ]
-              },
-              ...graph.vertices.slice(drag.index + 1)
-            ]
-          }));
+          onMouseMove(e);
           setDrag(null);
         };
 
@@ -187,20 +292,17 @@ function GraphEditor({ graph, setGraph, setView }: GraphEditorProps) {
         };
       } else {
         let createVertex = true;
+
         const onMouseMove = (e: MouseEvent) => {
-          let xDiff = e.clientX - svgDimensions[0] - svgDimensions[2] / 2 - drag.position[0];
-          let yDiff = e.clientY - svgDimensions[1] - svgDimensions[3] / 2 - drag.position[1];
+          let xDiff = e.clientX - svgDimensions.x - svgDimensions.width / 2 - drag.initialPosition[0];
+          let yDiff = e.clientY - svgDimensions.y - svgDimensions.height / 2 - drag.initialPosition[1];
           if (Math.pow(xDiff, 2) + Math.pow(yDiff, 2) > 25) {
             createVertex = false;
           }
         };
 
         const onMouseUp = (e: MouseEvent) => {
-          let xDiff = e.clientX - svgDimensions[0] - svgDimensions[2] / 2 - drag.position[0];
-          let yDiff = e.clientY - svgDimensions[1] - svgDimensions[3] / 2 - drag.position[1];
-          if (Math.pow(xDiff, 2) + Math.pow(yDiff, 2) > 25) {
-            createVertex = false;
-          }
+          onMouseMove(e);
           if (createVertex) {
             setGraph(graph => ({
               ...graph,
@@ -208,7 +310,7 @@ function GraphEditor({ graph, setGraph, setView }: GraphEditorProps) {
                 ...graph.vertices,
                 {
                   type: "Player 1",
-                  position: drag.position,
+                  position: drag.initialPosition,
                   target: false,
                 }
               ]
@@ -233,21 +335,80 @@ function GraphEditor({ graph, setGraph, setView }: GraphEditorProps) {
     }
   }, [svgDimensions, drag, setGraph]);
 
+  // We keep track of edges to later check if the reverse edge exists.
+  const edges = new Set<number>();
+  graph.edges.forEach(edge => {
+    edges.add(edge.endpoints[0] * graph.vertices.length + edge.endpoints[1]);
+  });
+
   return (
     <div className="w-screen h-screen flex">
       <div className="w-80 p-3 border-r-2">
         <div className="py-3 border-b-2 flex justify-between">
-        <button onClick={() => {
-          setGraph({
-            vertices: [],
-            edges: [],
-            start: null,
-            locks: [],
-          });
-          setDrag(null);
-          setSelected(null);
-          setAddEdge(null);
-        }} className="bg-gray-300 py-1 px-2 rounded">Reset</button>
+          <label htmlFor="fileInput" className="bg-gray-300 py-1 px-2 rounded">Open</label>
+          <input type="file" accept="application/json"
+            id="fileInput"
+            onChange={async (e) => {
+              const fileInput = e.target as HTMLInputElement;
+
+              if (fileInput.files) {
+                const text = await fileInput.files[0].text();
+                const parseResult = graphSchema.safeParse(JSON.parse(text));
+
+                if (parseResult.success) {
+                  const graph = parseResult.data;
+
+                  let valid = true;
+                  if (graph.start !== null && graph.start >= graph.vertices.length) {
+                    valid = false;
+                  }
+                  graph.edges.forEach(edge => {
+                    if (edge.endpoints[0] >= graph.vertices.length 
+                      || edge.endpoints[1] >= graph.vertices.length) {
+                      valid = false;
+                    }
+                    edge.locks.forEach(lock => {
+                      if (lock >= graph.locks.length) {
+                        valid = false;
+                      }
+                    });
+                    edge.keys.forEach(key => {
+                      if (key >= graph.locks.length) {
+                        valid = false;
+                      }
+                    })
+                  });
+                  if (!valid) {
+                    return;
+                  }
+
+                  setGraph(graph as Graph);
+                  setSelected(null);
+                  setDrag(null);
+                  setAddEdge(null);
+                }
+              }
+            }} className="hidden" />
+          <a onClick={(e: React.MouseEvent) => {
+            const file = new File([JSON.stringify(graph)], "graph.json", {
+              type: "application/json",
+            });
+            (e.target as HTMLAnchorElement).href = URL.createObjectURL(file);
+          }} 
+          download="graph.json" className="bg-gray-300 py-1 px-2 rounded">Save</a>
+        </div>
+        <div className="py-3 border-b-2 flex justify-between">
+          <button onClick={() => {
+            setGraph({
+              vertices: [],
+              edges: [],
+              start: null,
+              locks: [],
+            });
+            setDrag(null);
+            setSelected(null);
+            setAddEdge(null);
+          }} className="bg-gray-300 py-1 px-2 rounded">Reset</button>
           <span>
             {graph.start !== null && (
               <button onClick={() => { setView('game'); }} className="bg-gray-300 py-1 px-2 rounded">Play</button>
@@ -267,10 +428,10 @@ function GraphEditor({ graph, setGraph, setView }: GraphEditorProps) {
           selected === null && (
             <div className="py-3">
               <div className="flex justify-between items-center mb-5">
-                <span className="text-xl font-bold">Locks</span>
-                {graph.locks.length < COLORS.length && addEdge === null && (
+                <span className="text-2xl font-bold">Locks</span>
+                {graph.locks.length < LOCK_COLORS.length && addEdge === null && (
                   <button onClick={() => {
-                    const color = COLORS.find(color => graph.locks.findIndex(lock => lock.color === color) === -1)!;
+                    const color = LOCK_COLORS.find(color => graph.locks.findIndex(lock => lock.color === color) === -1)!;
                     setGraph({
                       ...graph,
                       locks: [
@@ -334,11 +495,14 @@ function GraphEditor({ graph, setGraph, setView }: GraphEditorProps) {
           selected !== null
           && selected.object === "edge"
           && (
-            <div className="mt-3" key={selected.index}>
+            <div className="mt-3 space-y-3" key={selected.index}>
               <div className="flex justify-between">
                 <button onClick={() => {
                   setSelected(null);
                 }} className="bg-gray-300 py-1 px-2 rounded">Back</button>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-2xl font-bold">Edge</span>
                 <button onClick={() => {
                   setDrag(null);
                   setSelected(null);
@@ -351,16 +515,16 @@ function GraphEditor({ graph, setGraph, setView }: GraphEditorProps) {
                   });
                 }}><FaTrash /></button>
               </div>
-              <div className="mt-3">
+              <div>
                 <div className="flex justify-between">
                   <span className="text-xl font-bold">Locks</span>
-                  <AddChoice choices={graph.locks.map((_, i) => {
+                  <SelectAndAdd choices={graph.locks.map((_, i) => {
                     return {
                       label: `Lock ${i + 1}`,
                       value: i,
                     };
                   }).filter(choice => !graph.edges[selected.index].locks.includes(choice.value))}
-                    onAdd={(lock) => {
+                    onChoose={(lock) => {
                       setGraph({
                         ...graph,
                         edges: [
@@ -397,16 +561,16 @@ function GraphEditor({ graph, setGraph, setView }: GraphEditorProps) {
                     }}><FaTrash /></button>
                   </div>)}
               </div>
-              <div className="mt-3">
+              <div>
                 <div className="flex justify-between">
                   <span className="text-xl font-bold">Keys</span>
-                  <AddChoice choices={graph.locks.map((_, i) => {
+                  <SelectAndAdd choices={graph.locks.map((_, i) => {
                     return {
                       label: `Key ${i + 1}`,
                       value: i,
                     };
                   }).filter(choice => !graph.edges[selected.index].keys.includes(choice.value))}
-                    onAdd={(key) => {
+                    onChoose={(key) => {
                       setGraph({
                         ...graph,
                         edges: [
@@ -450,11 +614,14 @@ function GraphEditor({ graph, setGraph, setView }: GraphEditorProps) {
           selected !== null
           && selected.object === "vertex"
           && (
-            <div className="mt-2">
-              <div className="flex justify-between">
+            <div className="mt-3 space-y-3">
+              <div>
                 <button onClick={() => {
-                  setSelected(null);
+                    setSelected(null);
                 }} className="bg-gray-300 py-1 px-2 rounded">Back</button>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-2xl font-bold">Vertex</span>
                 <button onClick={() => {
                   setDrag(null);
                   setSelected(null);
@@ -483,72 +650,65 @@ function GraphEditor({ graph, setGraph, setView }: GraphEditorProps) {
                 }}><FaTrash /></button>
               </div>
               <div className="flex justify-between items-center my-5">
-                <span>
-                  <input type="checkbox" id="target" checked={graph.vertices[selected.index].target} onChange={(e) => {
-                    setGraph({
-                      ...graph,
-                      vertices: [
-                        ...graph.vertices.slice(0, selected.index),
-                        {
-                          ...graph.vertices[selected.index],
-                          target: !graph.vertices[selected.index].target,
-                        },
-                        ...graph.vertices.slice(selected.index + 1),
-                      ]
-                    });
-                  }} />
-                  <label htmlFor="target">Target</label>
-                </span>
                 {selected.index !== graph.start && (
                   <button onClick={() => {
                     setGraph({
                       ...graph,
                       start: selected.index,
                     });
-                  }} className="bg-gray-300 py-0.5 px-1 rounded">Set as start</button>
+                  }} className="bg-gray-300 py-0.5 px-1 rounded">Set as start vertex</button>
                 )}
                 {selected.index === graph.start && (
-                  <span className="py-0.5 px-1">Start vertex</span>
+                  <span className="py-0.5">Start vertex</span>
                 )}
               </div>
-              {(
-                <div className="flex gap-5 items-center">
-                  <span>{graph.vertices[selected.index].type}</span>
-                  <button onClick={() => {
-                    setGraph({
-                      ...graph,
-                      vertices: [
-                        ...graph.vertices.slice(0, selected.index),
-                        {
-                          ...graph.vertices[selected.index],
-                          type: graph.vertices[selected.index].type === "Player 1" ? "Player 2" : "Player 1",
-                        },
-                        ...graph.vertices.slice(selected.index + 1)
-                      ]
-                    })
-                  }} className="bg-gray-300 py-1 px-2 rounded">Change player</button>
-                </div>
-              )}
+              <div className="flex justify-between items-center">
+                <span>{graph.vertices[selected.index].type}</span>
+                <button onClick={() => {
+                  setGraph({
+                    ...graph,
+                    vertices: [
+                      ...graph.vertices.slice(0, selected.index),
+                      {
+                        ...graph.vertices[selected.index],
+                        type: graph.vertices[selected.index].type === "Player 1" ? "Player 2" : "Player 1",
+                      },
+                      ...graph.vertices.slice(selected.index + 1)
+                    ]
+                  })
+                }} className="bg-gray-300 py-1 px-2 rounded">Change player</button>
+              </div>
+              <div className="flex justify-between">
+                <label htmlFor="target">Target</label>
+                <input type="checkbox" id="target" checked={graph.vertices[selected.index].target} onChange={(e) => {
+                  setGraph({
+                    ...graph,
+                    vertices: [
+                      ...graph.vertices.slice(0, selected.index),
+                      {
+                        ...graph.vertices[selected.index],
+                        target: !graph.vertices[selected.index].target,
+                      },
+                      ...graph.vertices.slice(selected.index + 1),
+                    ]
+                  });
+                }} />
+              </div>
             </div>
           )
         }
       </div>
-      <div className="flex flex-grow" id="svgContainer">
-        <svg className="w-full h-full" viewBox={`${-svgDimensions[2] / 2} ${-svgDimensions[3] / 2} ${svgDimensions[2]} ${svgDimensions[3]}`}
+      <div className="flex flex-grow" ref={svgContainer}>
+        <svg className="w-full h-full" viewBox={`${-svgDimensions.width / 2} ${-svgDimensions.height / 2} ${svgDimensions.width} ${svgDimensions.height}`}
           onMouseDown={(e) => {
-            if (e.button !== 0) {
+            if (e.button !== 0 || addEdge !== null) {
               return;
             }
-
-            if (addEdge !== null) {
-              return;
-            }
-
             setDrag({
               object: "none",
-              position: [
-                e.clientX - svgDimensions[0] - svgDimensions[2] / 2,
-                e.clientY - svgDimensions[1] - svgDimensions[3] / 2,
+              initialPosition: [
+                e.clientX - svgDimensions.x - svgDimensions.width / 2,
+                e.clientY - svgDimensions.y - svgDimensions.height / 2,
               ],
               newVertexIndex: graph.vertices.length,
             });
@@ -556,15 +716,9 @@ function GraphEditor({ graph, setGraph, setView }: GraphEditorProps) {
           {graph.edges.map(({ endpoints: [v1, v2], locks, keys }, i) => {
             const onMouseDown = (e: React.MouseEvent) => {
               e.stopPropagation();
-
-              if (e.button !== 0) {
+              if (e.button !== 0 || addEdge !== null) {
                 return;
               }
-
-              if (addEdge !== null) {
-                return;
-              }
-
               setSelected({
                 object: "edge",
                 index: i
@@ -579,103 +733,53 @@ function GraphEditor({ graph, setGraph, setView }: GraphEditorProps) {
               color = "gray";
             }
 
-            let edgeDirection = [
-              graph.vertices[v2].position[0] - graph.vertices[v1].position[0],
-              graph.vertices[v2].position[1] - graph.vertices[v1].position[1]
-            ];
-            const edgeMidpoint = [
-              (graph.vertices[v2].position[0] + graph.vertices[v1].position[0]) / 2,
-              (graph.vertices[v2].position[1] + graph.vertices[v1].position[1]) / 2
-            ];
-            const edgeLength = Math.sqrt(Math.pow(edgeDirection[0], 2) + Math.pow(edgeDirection[1], 2));
-            if (edgeLength <= 0.01) {
-              edgeDirection = [1, 0];
-            } else {
-              edgeDirection[0] /= edgeLength;
-              edgeDirection[1] /= edgeLength;
-            }
-            const lockOffset = [20 * edgeDirection[1], -20 * edgeDirection[0]];
-
-            return (
-              <g key={i}>
-                <line x1={graph.vertices[v1].position[0]} y1={graph.vertices[v1].position[1]}
-                  x2={graph.vertices[v2].position[0]} y2={graph.vertices[v2].position[1]}
-                  stroke="transparent" strokeWidth="20" onMouseDown={onMouseDown}
-                />
-                <line x1={graph.vertices[v1].position[0]} y1={graph.vertices[v1].position[1]}
-                  x2={graph.vertices[v2].position[0]} y2={graph.vertices[v2].position[1]}
-                  stroke={color} strokeWidth="3" onMouseDown={onMouseDown}
-                />
-                {
-                  locks.map((lock, i) => {
-                    const position = [
-                      edgeMidpoint[0] + lockOffset[0] + (i - (locks.length - 1) / 2) * 20 * edgeDirection[0],
-                      edgeMidpoint[1] + lockOffset[1] + (i - (locks.length - 1) / 2) * 20 * edgeDirection[1],
-                    ] as [number, number];
-                    return <Lock key={i} position={position} color={graph.locks[lock].color} open={graph.locks[lock].open} />;
-                  })
-                }
-                {
-                  keys.map((key, i) => {
-                    const position = [
-                      edgeMidpoint[0] - lockOffset[0] + (i - (keys.length - 1) / 2) * 20 * edgeDirection[0],
-                      edgeMidpoint[1] - lockOffset[1] + (i - (keys.length - 1) / 2) * 20 * edgeDirection[1],
-                    ] as [number, number];
-                    return <Key key={i} position={position} color={graph.locks[key].color} />;
-                  })
-                }
-              </g>
-            );
+            return <Edge key={i} color={color} endpoints={[graph.vertices[v1].position, graph.vertices[v2].position]}
+                          locks={locks.map(lock => graph.locks[lock])}
+                          keys={keys.map(key => ({ color: graph.locks[key].color }))}
+                          onMouseDown={onMouseDown} type={(edges.has(graph.vertices.length * v2 + v1) || v1 === v2) ? 'curve' : 'line'}/>;
           })}
           {graph.vertices.map((vertex, i) => {
             const onMouseDown = (e: React.MouseEvent) => {
               e.stopPropagation();
-
               if (e.button !== 0) {
                 return;
               }
-
               if (addEdge !== null) {
-                if (addEdge.includes(i)) {
-                  setAddEdge([]);
-                } else {
-                  const newAddEdge = [...addEdge, i];
-                  if (newAddEdge.length < 2) {
-                    setAddEdge(newAddEdge);
-                  }
-                  else {
-                    setAddEdge(null);
-                    if (graph.edges.findIndex(({ endpoints }) =>
-                      endpoints[0] === newAddEdge[0] && endpoints[1] === newAddEdge[1]
-                      || endpoints[1] === newAddEdge[0] && endpoints[0] === newAddEdge[1]
-                    ) === -1) {
-                      setGraph({
-                        ...graph,
-                        edges: [...graph.edges, {
-                          endpoints: newAddEdge as [number, number],
-                          locks: [],
-                          keys: [],
-                        }]
-                      });
-                      setSelected({
-                        object: "edge",
-                        index: graph.edges.length,
-                      });
-                    }
+                // Selecting edge
+                const newAddEdge = [...addEdge, i];
+                if (newAddEdge.length < 2) {
+                  setAddEdge(newAddEdge);
+                }
+                else {
+                  setAddEdge(null);
+                  if (graph.edges.findIndex(({ endpoints }) =>
+                    endpoints[0] === newAddEdge[0] && endpoints[1] === newAddEdge[1]
+                  ) === -1) {
+                    setGraph({
+                      ...graph,
+                      edges: [...graph.edges, {
+                        endpoints: newAddEdge as [number, number],
+                        locks: [],
+                        keys: [],
+                      }]
+                    });
+                    setSelected({
+                      object: "edge",
+                      index: graph.edges.length,
+                    });
                   }
                 }
               } else {
+                // Selecting vertex
                 const offsetFromInitialPosition = [
-                  e.clientX - svgDimensions[0] - svgDimensions[2] / 2 - vertex.position[0],
-                  e.clientY - svgDimensions[1] - svgDimensions[3] / 2 - vertex.position[1],
+                  e.clientX - svgDimensions.x - svgDimensions.width / 2 - vertex.position[0],
+                  e.clientY - svgDimensions.y - svgDimensions.height / 2 - vertex.position[1],
                 ] as [number, number];
-
                 setDrag({
                   object: "vertex",
                   index: i,
                   offsetFromInitialPosition,
                 });
-
                 setSelected({
                   object: "vertex",
                   index: i,
@@ -751,6 +855,12 @@ function Game({ graph, setView }: GameProps) {
     gameText = `${graph.vertices[position].type}'s turn`;
   }
 
+  // We keep track of edges to later check if the reverse edge exists.
+  const edges = new Set<number>();
+  graph.edges.forEach(edge => {
+    edges.add(edge.endpoints[0] * graph.vertices.length + edge.endpoints[1]);
+  });
+
   return (
     <div className="w-screen h-screen flex flex-col overflow-hidden">
       <div className="w-full p-3 flex justify-between">
@@ -765,61 +875,36 @@ function Game({ graph, setView }: GameProps) {
       <div className="w-full flex-grow overflow-hidden" id="svgContainer">
         <svg className="w-full h-full"
             viewBox={`${-svgDimensions[2] / 2} ${-svgDimensions[3] / 2} ${svgDimensions[2]} ${svgDimensions[3]}`}>
-          {graph.edges.map(({ endpoints: [v1, v2], locks, keys }, i) => {
-            let edgeDirection = [
-              graph.vertices[v2].position[0] - graph.vertices[v1].position[0],
-              graph.vertices[v2].position[1] - graph.vertices[v1].position[1]
-            ];
-            const edgeMidpoint = [
-              (graph.vertices[v2].position[0] + graph.vertices[v1].position[0]) / 2,
-              (graph.vertices[v2].position[1] + graph.vertices[v1].position[1]) / 2
-            ];
-            const edgeLength = Math.sqrt(Math.pow(edgeDirection[0], 2) + Math.pow(edgeDirection[1], 2));
-            if (edgeLength <= 0.01) {
-              edgeDirection = [1, 0];
-            } else {
-              edgeDirection[0] /= edgeLength;
-              edgeDirection[1] /= edgeLength;
-            }
-            const lockOffset = [20 * edgeDirection[1], -20 * edgeDirection[0]];
-
-            return (
-              <g key={i}>
-                <line x1={graph.vertices[v1].position[0]} y1={graph.vertices[v1].position[1]}
-                  x2={graph.vertices[v2].position[0]} y2={graph.vertices[v2].position[1]}
-                  stroke="black" strokeWidth="3"
-                />
-                {
-                  locks.map((lock, i) => {
-                    const position = [
-                      edgeMidpoint[0] + lockOffset[0] + (i - (locks.length - 1) / 2) * 20 * edgeDirection[0],
-                      edgeMidpoint[1] + lockOffset[1] + (i - (locks.length - 1) / 2) * 20 * edgeDirection[1],
-                    ] as [number, number];
-                    return <Lock key={i} position={position} color={graph.locks[lock].color} open={isOpen[lock]} />;
-                  })
+          {graph.edges.map(({ endpoints: [v1, v2], locks, keys }, i) => (
+            <Edge key={i} color={"black"} endpoints={[graph.vertices[v1].position, graph.vertices[v2].position]}
+              locks={locks.map(lock => ({
+                color: graph.locks[lock].color,
+                open: isOpen[lock],
+              }))}
+              keys={keys.map(key => ({ color: graph.locks[key].color }))}
+              type={(edges.has(graph.vertices.length * v2 + v1) || v1 === v2) ? 'curve' : 'line'}
+              onMouseDown={() => {
+                if (targetReached) {
+                  return;
                 }
-                {
-                  keys.map((key, i) => {
-                    const position = [
-                      edgeMidpoint[0] - lockOffset[0] + (i - (keys.length - 1) / 2) * 20 * edgeDirection[0],
-                      edgeMidpoint[1] - lockOffset[1] + (i - (keys.length - 1) / 2) * 20 * edgeDirection[1],
-                    ] as [number, number];
-                    return <Key key={i} position={position} color={graph.locks[key].color} />;
-                  })
+                if (v1 === position && locks.every(lock => isOpen[lock])) {
+                    const newIsOpen = [...isOpen];
+                    keys.forEach(key => {
+                      newIsOpen[key] = !newIsOpen[key];
+                    });
+                    setIsOpen(newIsOpen);
+                    setPosition(v2);
+                    setTargetReached(targetReached || graph.vertices[v2].target);
                 }
-              </g>
-            );
-          })}
+              }}/>
+          ))}
           {graph.vertices.map((vertex, i) => {
-            const onMouseDown = (e: React.MouseEvent) => {
+            const onMouseDown = () => {
               graph.edges.forEach(edge => {
                 if (targetReached) {
                   return;
                 }
-
-                if ((edge.endpoints[0] === position && edge.endpoints[1] === i
-                  || edge.endpoints[1] === position && edge.endpoints[0] === i)
-                  && edge.locks.every(lock => isOpen[lock])) {
+                if (edge.endpoints[0] === position && edge.endpoints[1] === i && edge.locks.every(lock => isOpen[lock])) {
                     const newIsOpen = [...isOpen];
                     edge.keys.forEach(key => {
                       newIsOpen[key] = !newIsOpen[key];
@@ -851,7 +936,8 @@ function Game({ graph, setView }: GameProps) {
                 onMouseDown={onMouseDown} />;
             }
           })}
-          <circle cx={graph.vertices[position].position[0]} cy={graph.vertices[position].position[1]} r="15" fill="#4c1d95"/>
+          <circle cx={graph.vertices[position].position[0]} cy={graph.vertices[position].position[1]} r="15"
+                  className="pointer-events-none" fill="#4c1d95"/>
         </svg>
       </div>
     </div>
