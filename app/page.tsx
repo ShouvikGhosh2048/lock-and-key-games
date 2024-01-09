@@ -342,8 +342,8 @@ function GraphEditor({ graph, setGraph, setView }: GraphEditorProps) {
   });
 
   return (
-    <div className="w-screen h-screen flex">
-      <div className="w-80 p-3 border-r-2">
+    <div className="w-screen h-screen flex overflow-hidden">
+      <div className="w-80 p-3 border-r-2 overflow-auto">
         <div className="py-3 border-b-2 flex justify-between">
           <label htmlFor="fileInput" className="bg-gray-300 py-1 px-2 rounded">Open</label>
           <input type="file" accept="application/json"
@@ -936,8 +936,14 @@ function Game({ graph, setView }: GameProps) {
                 onMouseDown={onMouseDown} />;
             }
           })}
-          <circle cx={graph.vertices[position].position[0]} cy={graph.vertices[position].position[1]} r="15"
-                  className="pointer-events-none" fill="#4c1d95"/>
+          {graph.vertices[position].type === "Player 1" && (
+            <circle cx={graph.vertices[position].position[0]} cy={graph.vertices[position].position[1]} r="15"
+              className="pointer-events-none" fill="#4c1d95"/>
+          )}
+          {graph.vertices[position].type === "Player 2" && (
+            <rect x={graph.vertices[position].position[0] - 15} y={graph.vertices[position].position[1] - 15} width="30" height="30"
+              className="pointer-events-none" fill="#4c1d95"/>
+          )}
         </svg>
       </div>
     </div>
