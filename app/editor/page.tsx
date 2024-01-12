@@ -194,8 +194,8 @@ function GraphEditor({ graph, setGraph, setView }: GraphEditorProps) {
   });
 
   return (
-    <div className="h-full w-full flex">
-      <div className="w-80 p-3 border-r-2 overflow-auto">
+    <div className="h-full w-full flex overflow-hidden">
+      <div className="w-80 p-3 max-h-full border-r-2 overflow-auto">
         <div className="py-3 border-b-2 flex justify-between">
           <label htmlFor="fileInput" className="bg-gray-300 py-1 px-2 rounded">Open</label>
           <input type="file" accept="application/json"
@@ -739,8 +739,10 @@ export default function Editor() {
   useEffect(() => {
     // We prevent scroll.
     document.querySelector("body")!.style.overflow = "hidden";
+    (document.querySelector("body > div")! as HTMLDivElement).style.overflow = "hidden";
     return () => {
       document.querySelector("body")!.style.overflow = "auto";
+      (document.querySelector("body > div")! as HTMLDivElement).style.overflow = "auto";
     };
   }, []);
 
