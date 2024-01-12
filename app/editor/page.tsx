@@ -79,7 +79,6 @@ interface GraphEditorProps {
 }
 
 function GraphEditor({ graph, setGraph, setView }: GraphEditorProps) {
-  const svgContainer = useRef<HTMLDivElement>(null);
   const [svgDimensions, setSvgDimensions] = useState({ x: 0, y: 0, width: 0, height: 0 });
   const [drag, setDrag] = useState<null | {
     object: 'vertex',
@@ -99,8 +98,7 @@ function GraphEditor({ graph, setGraph, setView }: GraphEditorProps) {
   // Window resize
   useEffect(() => {
     const onResize = () => {
-      const { x, y, width, height } = svgContainer.current!.getBoundingClientRect();
-      setSvgDimensions({ x, y, width, height });
+      setSvgDimensions({ x: 320, y: 40, width: window.innerWidth - 320, height: window.innerHeight - 40 });
       setDrag(null);
     };
 
@@ -196,7 +194,7 @@ function GraphEditor({ graph, setGraph, setView }: GraphEditorProps) {
   });
 
   return (
-    <div className="flex-grow w-full flex overflow-hidden">
+    <div className="h-full w-full flex">
       <div className="w-80 p-3 border-r-2 overflow-auto">
         <div className="py-3 border-b-2 flex justify-between">
           <label htmlFor="fileInput" className="bg-gray-300 py-1 px-2 rounded">Open</label>
@@ -552,8 +550,8 @@ function GraphEditor({ graph, setGraph, setView }: GraphEditorProps) {
           )
         }
       </div>
-      <div className="flex flex-grow" ref={svgContainer}>
-        <svg className="w-full h-full" viewBox={`${-svgDimensions.width / 2} ${-svgDimensions.height / 2} ${svgDimensions.width} ${svgDimensions.height}`}
+      <div className="h-full flex-grow">
+        <svg className="" viewBox={`${-svgDimensions.width / 2} ${-svgDimensions.height / 2} ${svgDimensions.width} ${svgDimensions.height}`}
           onMouseDown={(e) => {
             if (e.button !== 0 || addEdge !== null) {
               return;
@@ -684,6 +682,26 @@ interface GameViewProps {
 function GameView({ graph, setView }: GameViewProps) {
   const [isOpen, setIsOpen] = useState(graph.locks.map(lock => lock.open));
   const [position, setPosition] = useState(graph.start!);
+  const [svgDimensions, setSvgDimensions] = useState({
+    width: 0,
+    height: 0,
+  });
+
+  useEffect(() => {
+    const onResize = () => {
+      setSvgDimensions({
+        width: window.innerWidth,
+        height: window.innerHeight - 100,
+      });
+    }
+
+    onResize();
+
+    window.addEventListener('resize', onResize);
+    return () => {
+      window.removeEventListener('resize', onResize);
+    };
+  }, []);
 
   let gameText = '';
   if (graph.vertices[position].target) {
@@ -703,7 +721,7 @@ function GameView({ graph, setView }: GameViewProps) {
         }}>Reset</button>
       </div>
       <div className="w-full flex-grow overflow-hidden">
-        <Game graph={graph} isOpen={isOpen} setIsOpen={setIsOpen} position={position} setPosition={setPosition}/>
+        <Game graph={graph} isOpen={isOpen} setIsOpen={setIsOpen} position={position} setPosition={setPosition} svgDimensions={svgDimensions}/>
       </div>
     </div>
   );
@@ -717,6 +735,14 @@ export default function Editor() {
     locks: [],
   });
   const [view, setView] = useState<'editor' | 'game'>('editor');
+
+  useEffect(() => {
+    // We prevent scroll.
+    document.querySelector("body")!.style.overflow = "hidden";
+    return () => {
+      document.querySelector("body")!.style.overflow = "auto";
+    };
+  }, []);
 
   if (view === 'editor') {
     return <GraphEditor graph={graph} setGraph={setGraph} setView={setView}/>;

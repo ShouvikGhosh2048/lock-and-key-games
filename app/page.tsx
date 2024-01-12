@@ -29,7 +29,7 @@ function GameWithControls({ graph, scale }: GameWithControlsProps) {
             </div>
             <div className="h-80 w-80 mx-auto">
                 <Game graph={graph} isOpen={isOpen} setIsOpen={setIsOpen}
-                    position={position} setPosition={setPosition} scale={scale} />
+                    position={position} setPosition={setPosition} scale={scale} svgDimensions={{ width: 320, height: 320 }}/>
             </div>
             <p className="text-center">Click on a vertex or edge to move</p>
         </div>
